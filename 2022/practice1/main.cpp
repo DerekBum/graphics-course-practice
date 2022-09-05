@@ -102,7 +102,7 @@ int main() try
 	if (!GLEW_VERSION_3_3)
 		throw std::runtime_error("OpenGL 3.3 is not supported");
 
-    const char* lol = R"(#version 330 core
+    const char* fragment_source = R"(#version 330 core
 layout (location = 0) out vec4 out_color;
 in vec3 color;
 void main()
@@ -115,9 +115,9 @@ else
 out_color = vec4(1.0, 1.0, 1.0, 1.0);
 }
 )";
-    auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, lol);
+    auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_source);
 
-    const char* kek = R"(#version 330 core
+    const char* vertex_source = R"(#version 330 core
 const vec2 VERTICES[3] = vec2[3](
 vec2(0.0, 0.0),
 vec2(1.0, 0.0),
@@ -131,7 +131,7 @@ color = vec3(gl_Position.x, gl_Position.y, 0.0);
 }
 )";
 
-    auto vertex_shader = create_shader(GL_VERTEX_SHADER, kek);
+    auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_source);
     auto program_shader = create_program(vertex_shader, fragment_shader);
 
     GLuint arr;
