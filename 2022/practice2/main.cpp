@@ -30,16 +30,38 @@ void glew_fail(std::string_view message, GLenum error)
 const char vertex_shader_source[] =
 R"(#version 330 core
 
+//uniform float scale;
+//uniform float angle;
+uniform mat4 transform;
+uniform mat4 view;
+
+/*
 const vec2 VERTICES[3] = vec2[3](
     vec2(0.0, 1.0),
     vec2(-sqrt(0.75), -0.5),
     vec2( sqrt(0.75), -0.5)
+);*/
+
+const vec2 VERTICES[8] = vec2[8](
+    vec2(0.0, 0.0),
+    vec2(0.0, 1.0),
+    vec2(-sqrt(0.75), 0.5),
+    vec2(-sqrt(0.75), -0.5),
+    vec2(0.0, -1.0),
+    vec2(sqrt(0.75), -0.5),
+    vec2(sqrt(0.75), 0.5),
+    vec2(0.0, 1.0)
 );
 
-const vec3 COLORS[3] = vec3[3](
+const vec3 COLORS[8] = vec3[8](
+    vec3(1.0, 1.0, 1.0),
     vec3(1.0, 0.0, 0.0),
     vec3(0.0, 1.0, 0.0),
-    vec3(0.0, 0.0, 1.0)
+    vec3(0.0, 0.0, 1.0),
+    vec3(1.0, 1.0, 0.0),
+    vec3(0.0, 1.0, 1.0),
+    vec3(1.0, 0.0, 1.0),
+    vec3(1.0, 0.0, 0.0)
 );
 
 out vec3 color;
@@ -47,7 +69,15 @@ out vec3 color;
 void main()
 {
     vec2 position = VERTICES[gl_VertexID];
-    gl_Position = vec4(position, 0.0, 1.0);
+    /*position *= scale;
+
+    mat2 rotation = mat2(
+        cos(angle), sin(angle),
+        -sin(angle), cos(angle)
+    );
+    position = rotation * position;
+    gl_Position = vec4(position, 0.0, 1.0);*/
+    gl_Position = view * transform * vec4(position, 0.0, 1.0);
     color = COLORS[gl_VertexID];
 }
 )";
@@ -136,6 +166,8 @@ int main() try
     if (!GLEW_VERSION_3_3)
         throw std::runtime_error("OpenGL 3.3 is not supported");
 
+    SDL_GL_SetSwapInterval(0);
+
     glClearColor(0.8f, 0.8f, 1.f, 0.f);
 
     GLuint vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source);
@@ -145,6 +177,16 @@ int main() try
 
     GLuint vao;
     glGenVertexArrays(1, &vao);
+
+    glUseProgram(program);
+    //GLint locationScale   = glGetUniformLocation(program, "scale");
+    //GLint locationAngle   = glGetUniformLocation(program, "angle");
+    GLint locationTransform = glGetUniformLocation(program, "transform");
+    GLint locationView      = glGetUniformLocation(program, "view");
+    //glUniform1f(locationScale, 0.5);
+
+    float time = 0.f;
+    float scale = 0.5;
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -171,14 +213,46 @@ int main() try
             break;
 
         auto now = std::chrono::high_resolution_clock::now();
-        float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
+        //float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
+        float dt = 0.016f;
+
+        std::cout << dt << std::endl;
+
+        time += dt;
+
         last_frame_start = now;
 
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(program);
+
+        float x = 0;
+        float y = 1;
+
+        float aspectRatio = (float)width / (float)height;
+
+        float transform[16] =
+                {
+                        cos(time) * scale, sin(time) * scale, 0, x * cos(time) * scale + y * sin(time) * scale,
+                        -sin(time) * scale, cos(time) * scale, 0, -x * sin(time) * scale + y * cos(time) * scale,
+                        0, 0, 1, 0,
+                        0, 0, 0, 1
+                };
+        float view[16] =
+                {
+                        1 / aspectRatio, 0, 0, 0,
+                        0, 1, 0, 0,
+                        0, 0, 1, 0,
+                        0, 0, 0, 1
+                };
+
+        //glUniform1f(locationAngle, time);
+
+        glUniformMatrix4fv(locationTransform, 1, GL_TRUE, transform);
+        glUniformMatrix4fv(locationView, 1, GL_TRUE, view);
+
         glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 8);
 
         SDL_GL_SwapWindow(window);
     }
