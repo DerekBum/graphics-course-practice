@@ -52,7 +52,7 @@ const char fragment_shader_source[] =
 R"(#version 330 core
 
 uniform int dash;
-uniform int time;
+uniform float time;
 
 in vec4 color;
 in float dist;
@@ -332,7 +332,7 @@ int main() try
         last_frame_start = now;
         time += dt;
 
-        glUniform1i(time_location, time);
+        glUniform1f(time_location, time);
 
         glClear(GL_COLOR_BUFFER_BIT);
 
