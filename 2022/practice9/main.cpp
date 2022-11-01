@@ -77,6 +77,7 @@ uniform mat4 transform;
 uniform sampler2D shadow_map;
 uniform float bias;
 uniform float delta;
+uniform float texture_size;
 
 in vec3 position;
 in vec3 normal;
@@ -96,7 +97,7 @@ void main()
         {
             float d = length(vec2(x, y));
             float w = exp(-d * d / 25.0);
-            data += texture(shadow_map, shadow_pos.xy + vec2(x, y) * 0.001).rg * w;
+            data += texture(shadow_map, shadow_pos.xy + vec2(x, y) / texture_size).rg * w;
             weight += w;
         }
     }
@@ -186,7 +187,7 @@ void main()
     float z = gl_FragCoord.z;
     float dx = dFdx(z);
     float dy = dFdy(z);
-    float add_sq = 1.f / 4.f * (dx * dx + dy * dy);
+    float add_sq = 0.25f * (dx * dx + dy * dy);
     out_color = vec4(z, z * z + add_sq, 0.0, 0.0);
 }
 )";
@@ -276,6 +277,7 @@ int main() try
     GLuint transform_location = glGetUniformLocation(program, "transform");
     GLuint bias_location = glGetUniformLocation(program, "bias");
     GLuint delta_location = glGetUniformLocation(program, "delta");
+    GLuint texture_size_location = glGetUniformLocation(program, "texture_size");
 
     GLuint ambient_location = glGetUniformLocation(program, "ambient");
     GLuint light_direction_location = glGetUniformLocation(program, "light_direction");
@@ -318,8 +320,8 @@ int main() try
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, scene.indices.size() * sizeof(scene.indices[0]), scene.indices.data(), GL_STATIC_DRAW);
 
-    glm::vec3 min = {2.f, 2.f, 2.f};
-    glm::vec3 max = {-2.f, -2.f, -2.f};
+    auto min = glm::vec3(std::numeric_limits<float>::infinity());
+    auto max = glm::vec3(-std::numeric_limits<float>::infinity());
     for (auto & vertex : scene.vertices) {
         min.x = std::min(min.x, vertex.position[0]);
         min.y = std::min(min.y, vertex.position[1]);
@@ -344,8 +346,10 @@ int main() try
     GLuint shadow_map;
     glGenTextures(1, &shadow_map);
     glBindTexture(GL_TEXTURE_2D, shadow_map);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, shadow_map_resolution, shadow_map_resolution, 0, GL_RGBA, GL_FLOAT, nullptr);
@@ -354,14 +358,14 @@ int main() try
     glGenFramebuffers(1, &shadow_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
     glFramebufferTexture(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, shadow_map, 0);
-    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        throw std::runtime_error("Incomplete framebuffer!");
 
     GLuint depth_rb;
     glGenRenderbuffers(1, &depth_rb);
     glBindRenderbuffer(GL_RENDERBUFFER, depth_rb);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, shadow_map_resolution, shadow_map_resolution);
     glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth_rb);
+    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        throw std::runtime_error("Incomplete framebuffer!");
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
@@ -487,7 +491,7 @@ int main() try
                 0.f, 0.f, 1.f, -C.z,
                 0.f, 0.f, 0.f, 1.f
         };
-        glm::mat4 transform = glm::transpose(lens) * glm::inverse(glm::transpose(poss)) * glm::transpose(cent);
+        glm::mat4 transform = glm::transpose(lens) * poss * glm::transpose(cent);
 
         glUseProgram(shadow_program);
         glUniformMatrix4fv(shadow_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
@@ -535,6 +539,7 @@ int main() try
         glUniform3f(light_color_location, 0.8f, 0.8f, 0.8f);
         glUniform1f(bias_location, 0.01f);
         glUniform1f(delta_location, 0.125f);
+        glUniform1f(texture_size_location, shadow_map_resolution);
 
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, scene.indices.size(), GL_UNSIGNED_INT, nullptr);
