@@ -34,5 +34,6 @@ target_link_libraries(${TARGET_NAME} PUBLIC
 	"${GLEW_LIBRARIES}"
 	"${SDL2_LIBRARIES}"
 	"${OPENGL_LIBRARIES}"
+	"stdc++fs"
 )
 target_compile_definitions(${TARGET_NAME} PUBLIC -DPROJECT_ROOT="${PROJECT_ROOT}")
