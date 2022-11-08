@@ -415,7 +415,6 @@ int main() try
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);
 
         float near = 0.1f;
@@ -437,6 +436,8 @@ int main() try
 
         glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
+        glDisable(GL_DEPTH_TEST);
+
         glUseProgram(back_program);
 
         auto back_view = glm::inverse(projection * view);
@@ -451,7 +452,7 @@ int main() try
         glBindVertexArray(back_vao);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        glClear(GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
 
         glUseProgram(program);
         glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
