@@ -73,6 +73,8 @@ uniform vec3 light_direction;
 uniform vec3 bbox_min;
 uniform vec3 bbox_max;
 
+uniform sampler3D cloud_texture;
+
 layout (location = 0) out vec4 out_color;
 
 void sort(inout float x, inout float y)
@@ -108,12 +110,62 @@ vec2 intersect_bbox(vec3 origin, vec3 direction)
 }
 
 const float PI = 3.1415926535;
+//const float absorption = 0.0;
+//const float scattering = 4.0;
+//const float extinction = absorption + scattering;
+const vec3 absorption = vec3(0.0);
+const vec3 scattering = vec3(4.0, 2.0, 7.0);
+const vec3 extinction = absorption + scattering;
 
 in vec3 position;
 
 void main()
 {
-    out_color = vec4(1.0, 0.5, 0.5, 1.0);
+    vec3 camera_direction = normalize(position - camera_position);
+    vec2 t = intersect_bbox(camera_position, camera_direction);
+    t[0] = max(t[0], 0.0);
+
+    vec3 light_color = vec3(16.0);
+    vec3 color = vec3(0.0);
+
+    //float optical_depth = (t[1] - t[0]) * absorption;
+    //float optical_depth = 0.0;
+    vec3 optical_depth = vec3(0.0);
+    float step = (t[1] - t[0]) / 64.0;
+    for (int i = 0; i < 64; i++)
+    {
+        float t_f = t[0] + step * (float(i) + 0.5);
+        vec3 p = camera_position + t_f * camera_direction;
+        float density = texture(cloud_texture, (p - bbox_min) / (bbox_max - bbox_min)).r;
+        optical_depth += density * step * extinction;
+
+        vec2 light_t = intersect_bbox(p, light_direction);
+        light_t[0] = max(light_t[0], 0.0);
+        float light_step = (light_t[1] - light_t[0]) / 16.0;
+
+        //float light_optical_depth = 0.0;
+        vec3 light_optical_depth = vec3(0.0);
+        for (int j = 0; j < 16; j++)
+        {
+            float light_t_f = light_t[0] + light_step * (float(j) + 0.5);
+            vec3 light_p = p + light_t_f * light_direction;
+            float light_density = texture(cloud_texture, (light_p - bbox_min) / (bbox_max - bbox_min)).r;
+            light_optical_depth += light_density * light_step * extinction;
+        }
+
+        color += light_color * exp(-light_optical_depth) * exp(-optical_depth) * step * density * scattering / 4.0 / PI;
+    }
+
+    // out_color = vec4(1.0, 0.5, 0.5, 1.0);
+    // out_color = vec4(vec3((t[1] - t[0]) / 4.0), 1.0);
+    // out_color = vec4(0.0, 0.0, 1.0, opacity);
+    // out_color = vec4(color, opacity);
+
+    // vec3 p = camera_position + camera_direction * (t[0] + t[1]) / 2.0;
+    // vec3 tex_coord = (p - bbox_min) / (bbox_max - bbox_min);
+    // out_color = vec4(texture3D(cloud_texture, tex_coord).xxx, 1.0);
+
+    out_color = vec4(color, 1.0);
 }
 )";
 
@@ -236,6 +288,7 @@ int main() try
     GLuint bbox_max_location = glGetUniformLocation(program, "bbox_max");
     GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
     GLuint light_direction_location = glGetUniformLocation(program, "light_direction");
+    GLuint texture_location = glGetUniformLocation(program, "cloud_texture");
 
     GLuint vao, vbo, ebo;
     glGenVertexArrays(1, &vao);
@@ -254,6 +307,20 @@ int main() try
 
     const std::string project_root = PROJECT_ROOT;
     const std::string cloud_data_path = project_root + "/cloud.data";
+
+    std::vector<char> pixels(128 * 64 * 64);
+    std::ifstream input(cloud_data_path, std::ios::binary);
+    input.read(pixels.data(), pixels.size());
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_3D, texture);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_R8, 128, 64, 64, 0, GL_RED, GL_UNSIGNED_BYTE, pixels.data());
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     const glm::vec3 cloud_bbox_min{-2.f, -1.f, -1.f};
     const glm::vec3 cloud_bbox_max{ 2.f,  1.f,  1.f};
@@ -323,7 +390,8 @@ int main() try
         if (button_down[SDLK_s])
             view_angle += 2.f * dt;
 
-        glClearColor(0.8f, 0.8f, 0.9f, 0.f);
+        //glClearColor(0.8f, 0.8f, 0.9f, 0.f);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glEnable(GL_DEPTH_TEST);
@@ -357,6 +425,7 @@ int main() try
         glUniform3fv(bbox_max_location, 1, reinterpret_cast<const float *>(&cloud_bbox_max));
         glUniform3fv(camera_position_location, 1, reinterpret_cast<float *>(&camera_position));
         glUniform3fv(light_direction_location, 1, reinterpret_cast<float *>(&light_direction));
+        glUniform1i(texture_location, 0);
 
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, std::size(cube_indices), GL_UNSIGNED_INT, nullptr);
