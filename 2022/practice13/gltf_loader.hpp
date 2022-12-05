@@ -1,6 +1,6 @@
 #pragma once
 
-#include <filesystem>
+#include <experimental/filesystem>
 #include <vector>
 #include <string>
 #include <optional>
@@ -87,7 +87,7 @@ struct gltf_model
     std::unordered_map<std::string, animation> animations;
 };
 
-gltf_model load_gltf(std::filesystem::path const & path);
+gltf_model load_gltf(std::experimental::filesystem::path const & path);
 
 template <>
 inline glm::vec3 gltf_model::spline<glm::vec3>::operator()(float time) const

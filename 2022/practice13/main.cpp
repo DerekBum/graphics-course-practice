@@ -51,19 +51,30 @@ R"(#version 330 core
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform mat4x3 bones[64];
 
 layout (location = 0) in vec3 in_position;
 layout (location = 1) in vec3 in_normal;
 layout (location = 2) in vec2 in_texcoord;
+layout (location = 3) in ivec4 in_joints;
+layout (location = 4) in vec4 in_weights;
 
 out vec3 normal;
 out vec2 texcoord;
+out vec4 weights;
 
 void main()
 {
-    gl_Position = projection * view * model * vec4(in_position, 1.0);
-    normal = mat3(model) * in_normal;
+    mat4x3 average = bones[in_joints.x] * in_weights.x
+                   + bones[in_joints.y] * in_weights.y
+                   + bones[in_joints.z] * in_weights.z
+                   + bones[in_joints.w] * in_weights.w;
+
+
+    gl_Position = projection * view * model * mat4(average) * vec4(in_position, 1.0);
+    normal = mat3(model) * mat3(average) * in_normal;
     texcoord = in_texcoord;
+    weights = in_weights;
 }
 )";
 
@@ -80,6 +91,7 @@ layout (location = 0) out vec4 out_color;
 
 in vec3 normal;
 in vec2 texcoord;
+in vec4 weights;
 
 void main()
 {
@@ -94,6 +106,7 @@ void main()
     float diffuse = max(0.0, dot(normalize(normal), light_direction));
 
     out_color = vec4(albedo_color.rgb * (ambient + diffuse), albedo_color.a);
+    // out_color = weights;
 }
 )";
 
@@ -185,6 +198,7 @@ int main() try
     GLuint color_location = glGetUniformLocation(program, "color");
     GLuint use_texture_location = glGetUniformLocation(program, "use_texture");
     GLuint light_direction_location = glGetUniformLocation(program, "light_direction");
+    GLuint bones_location = glGetUniformLocation(program, "bones");
 
     const std::string project_root = PROJECT_ROOT;
     const std::string model_path = project_root + "/wolf/Wolf-Blender-2.82a.gltf";
@@ -234,9 +248,9 @@ int main() try
     for (auto const & mesh : meshes)
     {
         if (!mesh.material.texture_path) continue;
-        if (textures.contains(*mesh.material.texture_path)) continue;
+        if (textures.count(*mesh.material.texture_path) > 0) continue;
 
-        auto path = std::filesystem::path(model_path).parent_path() / *mesh.material.texture_path;
+        auto path = std::experimental::filesystem::path(model_path).parent_path() / *mesh.material.texture_path;
 
         int width, height, channels;
         auto data = stbi_load(path.c_str(), &width, &height, &channels, 4);
@@ -258,6 +272,8 @@ int main() try
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
     float time = 0.f;
+    float interpolation = 1.f;
+    float speed = 0.5f;
 
     std::map<SDL_Keycode, bool> button_down;
 
@@ -321,6 +337,13 @@ int main() try
         if (button_down[SDLK_s])
             view_angle += 2.f * dt;
 
+        if (button_down[SDLK_LSHIFT])
+            interpolation -= speed * dt;
+        else interpolation += speed * dt;
+
+        interpolation = std::min(interpolation, 1.f);
+        interpolation = std::max(interpolation, 0.f);
+
         glClearColor(0.8f, 0.8f, 1.f, 0.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -345,11 +368,48 @@ int main() try
 
         glm::vec3 light_direction = glm::normalize(glm::vec3(1.f, 2.f, 3.f));
 
+        float scale = 0.75 + cos(time) * 0.25;
+        std::vector<glm::mat4x3> bones(input_model.bones.size(), glm::mat4x3(scale));
+        const gltf_model::animation& run_animation = input_model.animations.at("01_Run");
+        const gltf_model::animation& walk_animation = input_model.animations.at("02_walk");
+
+        for (int i = 0; i < bones.size(); i++) {
+            auto translation_prep =
+                    glm::lerp(run_animation.bones[i].translation(std::fmod(time, run_animation.max_time)),
+                              walk_animation.bones[i].translation(std::fmod(time, walk_animation.max_time)),
+                              interpolation);
+            auto rotation_prep =
+                    glm::slerp(run_animation.bones[i].rotation(std::fmod(time, run_animation.max_time)),
+                               walk_animation.bones[i].rotation(std::fmod(time, walk_animation.max_time)),
+                               interpolation);
+            auto scale_prep =
+                    glm::lerp(run_animation.bones[i].scale(std::fmod(time, run_animation.max_time)),
+                              walk_animation.bones[i].scale(std::fmod(time, walk_animation.max_time)),
+                              interpolation);
+            /*auto translation = glm::translate(glm::mat4(1.f),
+                                              run_animation.bones[i].translation(std::fmod(time, run_animation.max_time)));
+            auto rotation = glm::toMat4(run_animation.bones[i].rotation(std::fmod(time, run_animation.max_time)));
+            auto scale_an = glm::scale(glm::mat4(1.f),
+                                       run_animation.bones[i].scale(std::fmod(time, run_animation.max_time)));*/
+            auto translation = glm::translate(glm::mat4(1.f), translation_prep);
+            auto rotation = glm::toMat4(rotation_prep);
+            auto scale_an = glm::scale(glm::mat4(1.f), scale_prep);
+            glm::mat4 transform = translation * rotation * scale_an;
+            if (input_model.bones[i].parent != -1)
+                transform = bones[input_model.bones[i].parent] * transform;
+            bones[i] = transform;
+        }
+
+        for (int i = 0; i < bones.size(); i++) {
+            bones[i] = bones[i] * input_model.bones[i].inverse_bind_matrix;
+        }
+
         glUseProgram(program);
         glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
         glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
         glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
         glUniform3fv(light_direction_location, 1, reinterpret_cast<float *>(&light_direction));
+        glUniformMatrix4x3fv(bones_location, bones.size(), GL_FALSE, reinterpret_cast<float *>(bones.data()));
 
         auto draw_meshes = [&](bool transparent)
         {

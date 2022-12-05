@@ -16,7 +16,7 @@ static unsigned int attribute_type_to_size(std::string const & type)
     throw std::runtime_error("Unknown attribute type: " + type);
 }
 
-gltf_model load_gltf(std::filesystem::path const & path)
+gltf_model load_gltf(std::experimental::filesystem::path const & path)
 {
     rapidjson::Document document;
 
@@ -36,7 +36,7 @@ gltf_model load_gltf(std::filesystem::path const & path)
 
         auto const buffer_path = path.parent_path() / buffer_uri;
 
-        result.buffer.resize(std::filesystem::file_size(buffer_path));
+        result.buffer.resize(std::experimental::filesystem::file_size(buffer_path));
         std::ifstream buffer(buffer_path, std::ios::binary);
         buffer.read(result.buffer.data(), result.buffer.size());
     }
@@ -141,7 +141,7 @@ gltf_model load_gltf(std::filesystem::path const & path)
 
         for (int i = 0; i < nodes.Size(); ++i)
         {
-            if (!bone_node_to_index.contains(i)) continue;
+            if (bone_node_to_index.count(i) == 0) continue;
 
             auto const & node = nodes[i];
 
@@ -150,7 +150,7 @@ gltf_model load_gltf(std::filesystem::path const & path)
             for (auto const & child : node["children"].GetArray())
             {
                 int child_id = child.GetInt();
-                if (bone_node_to_index.contains(child_id))
+                if (bone_node_to_index.count(child_id) > 0)
                     result.bones[bone_node_to_index.at(child_id)].parent = bone_node_to_index.at(i);
             }
         }
@@ -170,7 +170,7 @@ gltf_model load_gltf(std::filesystem::path const & path)
             for (auto const & channel : animation["channels"].GetArray())
             {
                 int node_id = channel["target"]["node"].GetInt();
-                if (!bone_node_to_index.contains(node_id)) continue;
+                if (bone_node_to_index.count(node_id) == 0) continue;
 
                 auto & bone = result_animation.bones[bone_node_to_index.at(node_id)];
 
