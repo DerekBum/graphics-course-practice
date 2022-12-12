@@ -15,7 +15,7 @@ static unsigned int attribute_type_to_size(std::string const & type)
     return 0;
 }
 
-gltf_model load_gltf(std::filesystem::path const & path)
+gltf_model load_gltf(std::experimental::filesystem::path const & path)
 {
     rapidjson::Document document;
 
@@ -35,7 +35,7 @@ gltf_model load_gltf(std::filesystem::path const & path)
 
         auto const buffer_path = path.parent_path() / buffer_uri;
 
-        result.buffer.resize(std::filesystem::file_size(buffer_path));
+        result.buffer.resize(std::experimental::filesystem::file_size(buffer_path));
         std::ifstream buffer(buffer_path, std::ios::binary);
         buffer.read(result.buffer.data(), result.buffer.size());
     }

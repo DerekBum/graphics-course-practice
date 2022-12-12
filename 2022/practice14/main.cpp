@@ -56,13 +56,14 @@ uniform mat4 projection;
 layout (location = 0) in vec3 in_position;
 layout (location = 1) in vec3 in_normal;
 layout (location = 2) in vec2 in_texcoord;
+layout (location = 3) in vec3 in_instance_position;
 
 out vec3 normal;
 out vec2 texcoord;
 
 void main()
 {
-    gl_Position = projection * view * model * vec4(in_position, 1.0);
+    gl_Position = projection * view * model * vec4(in_position + in_instance_position, 1.0);
     normal = mat3(model) * in_normal;
     texcoord = in_texcoord;
 }
@@ -190,6 +191,20 @@ int main() try
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, input_model.buffer.size(), input_model.buffer.data(), GL_STATIC_DRAW);
 
+//    std::vector <glm::vec3> translation;
+//    for (int x = -16; x < 16; ++x) {
+//        for (int z = -16; z < 16; ++z) {
+//            translation.emplace_back(x, 0, z);
+//        }
+//    }
+
+    GLuint VBO_translation;
+    glGenBuffers(1, &VBO_translation);
+//    glBindBuffer(GL_ARRAY_BUFFER, VBO_translation);
+//    glBufferData(GL_ARRAY_BUFFER, translation.size() * sizeof(glm::vec3), translation.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
     std::vector<GLuint> vaos;
     for (int i = 0; i < input_model.meshes.size(); ++i)
     {
@@ -209,6 +224,11 @@ int main() try
         setup_attribute(0, input_model.meshes[i].position);
         setup_attribute(1, input_model.meshes[i].normal);
         setup_attribute(2, input_model.meshes[i].texcoord);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_translation);
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 0, (void*)(0));
+        glVertexAttribDivisor(3, 1);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
         vaos.push_back(vao);
     }
@@ -217,7 +237,7 @@ int main() try
     {
         auto const & mesh = input_model.meshes[0];
 
-        auto path = std::filesystem::path(model_path).parent_path() / *mesh.material.texture_path;
+        auto path = std::experimental::filesystem::path(model_path).parent_path() / *mesh.material.texture_path;
 
         int width, height, channels;
         auto data = stbi_load(path.c_str(), &width, &height, &channels, 4);
@@ -243,6 +263,9 @@ int main() try
     float camera_rotation = 0.f;
 
     bool paused = false;
+
+    std::vector <GLuint> ID_query;
+    std::vector <bool> free;
 
     bool running = true;
     while (running)
@@ -306,6 +329,21 @@ int main() try
         camera_position += camera_move_forward * glm::vec3(-std::sin(camera_rotation), 0.f, std::cos(camera_rotation));
         camera_position += camera_move_sideways * glm::vec3(std::cos(camera_rotation), 0.f, std::sin(camera_rotation));
 
+        GLuint id = 0;
+        for (int i = 0; i < ID_query.size(); ++i) {
+            if (free[i]) {
+                id = ID_query[i];
+                free[i] = false;
+                break;
+            }
+        }
+        if (id == 0) {
+            glGenQueries(1, &id);
+            ID_query.push_back(id);
+            free.push_back(false);
+        }
+        glBeginQuery(GL_TIME_ELAPSED, id);
+
         glClearColor(0.8f, 0.8f, 1.f, 0.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -328,6 +366,29 @@ int main() try
 
         glm::vec3 light_direction = glm::normalize(glm::vec3(1.f, 2.f, 3.f));
 
+        frustum frust = frustum(projection * view);
+
+        std::vector <std::vector <glm::vec3>> translations(6);
+
+        for (int x = -16; x < 16; ++x) {
+            for (int z = -16; z < 16; ++z) {
+                aabb ab = aabb(input_model.meshes[0].min + glm::vec3(x, 0.f, z), input_model.meshes[0].max + glm::vec3(x, 0.f, z));
+                if (intersect(ab, frust)) {
+                    int LOD_number = glm::length(camera_position -
+                            (input_model.meshes[0].min + glm::vec3(x, 0.f, z) +
+                            input_model.meshes[0].max + glm::vec3(x, 0.f, z)) / 2.f) / 4.f;
+                    //std::cout << LOD_number << std::endl;
+                    if (LOD_number < 6)
+                        translations[LOD_number].push_back(glm::vec3(x, 0.f, z));
+                }
+            }
+        }
+
+//        glBindBuffer(GL_ARRAY_BUFFER, VBO_translation);
+//        glBufferData(GL_ARRAY_BUFFER, translation.size() * sizeof(glm::vec3), translation.data(), GL_STATIC_DRAW);
+//
+//        std::cout << "Number of instances: " << translation.size() << std::endl;
+
         glUseProgram(program);
         glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
         glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
@@ -336,10 +397,43 @@ int main() try
 
         glBindTexture(GL_TEXTURE_2D, texture);
 
-        {
-            auto const & mesh = input_model.meshes[0];
-            glBindVertexArray(vaos[0]);
-            glDrawElements(GL_TRIANGLES, mesh.indices.count, mesh.indices.type, reinterpret_cast<void *>(mesh.indices.view.offset));
+        glBindVertexArray(vaos[0]);
+
+//        for (int x = -16; x < 16; ++x) {
+//            for (int z = -16; z < 16; ++z) {
+//                glm::mat4 model(1.f);
+//                model = glm::translate(model, {x, 0.f, z});
+//                glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+//                glDrawElements(GL_TRIANGLES, mesh.indices.count, mesh.indices.type,
+//                               reinterpret_cast<void *>(mesh.indices.view.offset));
+//            }
+//        }
+
+//        glDrawElementsInstanced(GL_TRIANGLES, mesh.indices.count, mesh.indices.type,
+//                                reinterpret_cast<void *>(mesh.indices.view.offset), 1024);
+        for (int lod = 0; lod < 6; ++lod) {
+            auto const &mesh = input_model.meshes[lod];
+            glBindBuffer(GL_ARRAY_BUFFER, VBO_translation);
+            glBufferData(GL_ARRAY_BUFFER, translations[lod].size() * sizeof(glm::vec3), translations[lod].data(), GL_STATIC_DRAW);
+            glBindVertexArray(vaos[lod]);
+            glDrawElementsInstanced(GL_TRIANGLES, mesh.indices.count, mesh.indices.type,
+                                    reinterpret_cast<void *>(mesh.indices.view.offset), translations[lod].size());
+        }
+
+        glEndQuery(GL_TIME_ELAPSED);
+
+        std::cout << "Size: " << ID_query.size() << std::endl;
+
+        for (int i = 0; i < ID_query.size(); ++i) {
+            if (free[i]) continue;
+            GLint result;
+            glGetQueryObjectiv(ID_query[i], GL_QUERY_RESULT_AVAILABLE, &result);
+            if (result) {
+                GLuint64 time;
+                glGetQueryObjectui64v(ID_query[i], GL_QUERY_RESULT, &time);
+                std::cout << "Time: " << time / 1e6 << std::endl;
+                free[i] = true;
+            }
         }
 
         SDL_GL_SwapWindow(window);
