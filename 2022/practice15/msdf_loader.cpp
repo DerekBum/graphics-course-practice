@@ -5,7 +5,7 @@
 
 #include <fstream>
 #include <stdexcept>
-#include <filesystem>
+#include <experimental/filesystem>
 
 msdf_font load_msdf_font(std::string const & path)
 {
@@ -22,7 +22,7 @@ msdf_font load_msdf_font(std::string const & path)
     {
         auto pages = document["pages"].GetArray();
         assert(pages.Size() == 1);
-        result.texture_path = (std::filesystem::path(path).parent_path() / pages[0].GetString()).string();
+        result.texture_path = (std::experimental::filesystem::path(path).parent_path() / pages[0].GetString()).string();
     }
 
     {
